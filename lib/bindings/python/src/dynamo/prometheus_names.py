@@ -200,6 +200,33 @@ class name_prefix:
     COMPONENT = "dynamo_component"
     # Prefix for frontend service metrics
     FRONTEND = "dynamo_frontend"
+    # Prefix for KV router metrics (used with router_id label)
+    ROUTER = "dynamo_router"
+
+
+class router:
+    """Router request metrics (dynamo_router_* with router_id label).
+
+    These constants are the suffix portions of full metric names, combined with
+    name_prefix.ROUTER ("dynamo_router") to form the complete name, e.g.
+    dynamo_router_requests_total.
+
+    Note: dynamo_router_* metrics are registered with a const `router_id` label
+    (the router's discovery instance_id) and do NOT carry dynamo_namespace or
+    dynamo_component labels natively. The PodMonitor relabeling adds
+    dynamo_namespace from the pod label nvidia.com/dynamo-namespace.
+    """
+
+    # Total number of requests processed by the router
+    REQUESTS_TOTAL = "requests_total"
+    # Time to first token observed at the router (seconds)
+    TIME_TO_FIRST_TOKEN_SECONDS = "time_to_first_token_seconds"
+    # Average inter-token latency observed at the router (seconds)
+    INTER_TOKEN_LATENCY_SECONDS = "inter_token_latency_seconds"
+    # Input sequence length in tokens observed at the router
+    INPUT_SEQUENCE_TOKENS = "input_sequence_tokens"
+    # Output sequence length in tokens observed at the router
+    OUTPUT_SEQUENCE_TOKENS = "output_sequence_tokens"
 
 
 class routing_overhead:
