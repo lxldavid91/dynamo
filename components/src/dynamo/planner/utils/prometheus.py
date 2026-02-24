@@ -124,9 +124,12 @@ class PrometheusAPIClient:
             if model_name is None:
                 # Router aggregate path: filter by dynamo_namespace so each pool
                 # planner only reads its own LocalRouter's metrics.
-                # Prometheus labels use underscores; DYN_NAMESPACE uses dashes.
-                prom_namespace = self.dynamo_namespace.replace("-", "_")
-                ns_filter = f'{prometheus_names.labels.NAMESPACE}="{prom_namespace}"'
+                # dynamo_router_* metrics don't carry dynamo_namespace natively;
+                # the PodMonitor adds it via relabeling from the pod label
+                # nvidia.com/dynamo-namespace (dashes preserved, no normalization).
+                ns_filter = (
+                    f'{prometheus_names.labels.NAMESPACE}="{self.dynamo_namespace}"'
+                )
                 query = (
                     f"sum(increase({full_metric_name}_sum{{{ns_filter}}}[{interval}])) / "
                     f"sum(increase({full_metric_name}_count{{{ns_filter}}}[{interval}]))"
@@ -177,7 +180,7 @@ class PrometheusAPIClient:
     def get_avg_inter_token_latency(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             return self._get_average_metric(
-                f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.router.INTER_TOKEN_LATENCY_SECONDS}",
+                f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.INTER_TOKEN_LATENCY_SECONDS}",
                 interval,
                 "avg inter token latency",
             )
@@ -191,7 +194,7 @@ class PrometheusAPIClient:
     def get_avg_time_to_first_token(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             return self._get_average_metric(
-                f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.router.TIME_TO_FIRST_TOKEN_SECONDS}",
+                f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.TIME_TO_FIRST_TOKEN_SECONDS}",
                 interval,
                 "avg time to first token",
             )
@@ -205,7 +208,7 @@ class PrometheusAPIClient:
     def get_avg_request_duration(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             return self._get_average_metric(
-                f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.work_handler.REQUEST_DURATION_SECONDS}",
+                f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.work_handler.REQUEST_DURATION_SECONDS}",
                 interval,
                 "avg request duration",
             )
@@ -219,9 +222,10 @@ class PrometheusAPIClient:
     def get_avg_request_count(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             try:
-                router_req_total = f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.router.REQUESTS_TOTAL}"
-                prom_namespace = self.dynamo_namespace.replace("-", "_")
-                ns_filter = f'{prometheus_names.labels.NAMESPACE}="{prom_namespace}"'
+                router_req_total = f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.REQUESTS_TOTAL}"
+                ns_filter = (
+                    f'{prometheus_names.labels.NAMESPACE}="{self.dynamo_namespace}"'
+                )
                 query = f"sum(increase({router_req_total}{{{ns_filter}}}[{interval}]))"
                 result = self.prom.custom_query(query=query)
                 if not result:
@@ -266,7 +270,7 @@ class PrometheusAPIClient:
     def get_avg_input_sequence_tokens(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             return self._get_average_metric(
-                f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.router.INPUT_SEQUENCE_TOKENS}",
+                f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.INPUT_SEQUENCE_TOKENS}",
                 interval,
                 "avg input sequence tokens",
             )
@@ -280,7 +284,7 @@ class PrometheusAPIClient:
     def get_avg_output_sequence_tokens(self, interval: str, model_name: str):
         if self.metrics_source == "router":
             return self._get_average_metric(
-                f"{prometheus_names.name_prefix.COMPONENT}_{prometheus_names.router.OUTPUT_SEQUENCE_TOKENS}",
+                f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.OUTPUT_SEQUENCE_TOKENS}",
                 interval,
                 "avg output sequence tokens",
             )
@@ -290,6 +294,34 @@ class PrometheusAPIClient:
             "avg output sequence tokens",
             model_name,
         )
+
+    def warn_if_router_not_scraped(self) -> None:
+        """Warn if Prometheus is not scraping any dynamo_router_* series.
+
+        Called once at planner startup when throughput_metrics_source="router".
+        Detects a missing or misconfigured PodMonitor early so the operator
+        sees a clear warning rather than silent zero metrics.
+
+        Uses absent() to check whether any dynamo_router_requests_total series
+        exist for this namespace. If absent() returns a result the metric is
+        not present in Prometheus at all — either the PodMonitor is missing,
+        the LocalRouter pods haven't started yet, or DYN_SYSTEM_PORT is not 9090.
+        """
+        try:
+            metric = f"{prometheus_names.name_prefix.ROUTER}_{prometheus_names.router.REQUESTS_TOTAL}"
+            ns_filter = f'{prometheus_names.labels.NAMESPACE}="{self.dynamo_namespace}"'
+            result = self.prom.custom_query(query=f"absent({metric}{{{ns_filter}}})")
+            if result:
+                logger.warning(
+                    f"[throughput_metrics_source=router] No '{metric}' series found "
+                    f"for namespace '{self.dynamo_namespace}' in Prometheus. "
+                    "Router metrics will read as zero until scraping is working. "
+                    "Check: (1) PodMonitor 'dynamo-router' is installed in the operator namespace, "
+                    "(2) LocalRouter pods have DYN_SYSTEM_PORT=9090, "
+                    "(3) pods have label nvidia.com/metrics-enabled=true."
+                )
+        except Exception as e:
+            logger.warning(f"Could not check router scraping status: {e}")
 
 
 def parse_frontend_metric_containers(
