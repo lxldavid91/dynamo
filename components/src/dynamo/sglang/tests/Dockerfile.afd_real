@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Dockerfile for AFD Real GPU Test
+# Requires NVIDIA Docker runtime (nvidia-docker2)
+
+FROM nvcr.io/nvidia/pytorch:24.01-py3
+
+WORKDIR /app
+
+# Install dependencies (PyTorch already included in base image)
+RUN pip install --no-cache-dir numpy
+
+# Copy test scripts
+COPY afd_real_gpu_test.py .
+COPY afd_e2e_demo.py .
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Default: run real GPU test with small model
+CMD ["python", "afd_real_gpu_test.py", "--small-model", "--iterations", "5"]
